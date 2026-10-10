@@ -168,7 +168,8 @@ function reset(autostart) {
     nextObstacle: 900,
     nextScenery: -1500,
     nextLamp: -1500,
-    nextBuilding: -1500,
+    buildingRows: [{ v: VFAR + 30, next: -1500 }, { v: VFAR + 230, next: -1450 }],
+    signIdx: Math.floor(Math.random() * 20),
     nextEvent: 700 + Math.random() * 600,
     jm: { u: 620, v: R + 130, gone: false },
     skyDrone: null, nextSkyDrone: 400,
@@ -265,11 +266,21 @@ function fillScenery() {
     s.scenery.push({ type: 'lamp', u: s.nextLamp, v: R + 30 });
     s.nextLamp += 280;
   }
-  while (s.nextBuilding < cam + aheadFor(VFAR + 200, 260)) {
-    s.scenery.push({ type: 'building', u: s.nextBuilding, v: VFAR + 10 + Math.random() * 60,
-      lu: 90 + Math.random() * 130, d: 60 + Math.random() * 60, h: 60 + Math.random() * 170,
-      tone: Math.floor(Math.random() * 3) });
-    s.nextBuilding += 130 + Math.random() * 200;
+  for (const row of s.buildingRows) {
+    while (row.next < cam + aheadFor(row.v + 120, 280)) {
+      const b = { type: 'building', u: row.next, v: row.v + Math.random() * 30,
+        lu: 90 + Math.random() * 130, d: 70 + Math.random() * 60, h: 60 + Math.random() * 170,
+        tone: Math.floor(Math.random() * 3) };
+      if (Math.random() < 0.45) {
+        b.sign = BUILDING_SIGNS[s.signIdx++ % BUILDING_SIGNS.length];
+        ctx.font = `8px ${FONT}`;
+        const tw = Math.max(ctx.measureText(b.sign.text).width, b.sign.sub ? ctx.measureText(b.sign.sub).width * 0.75 : 0);
+        b.lu = Math.max(b.lu, tw + 34);
+        b.h = Math.max(b.h, 100);
+      }
+      s.scenery.push(b);
+      row.next += b.lu + 30 + Math.random() * 90;
+    }
   }
 }
 
@@ -423,12 +434,7 @@ function poly(pts, fill, stroke) {
 function quad(u0, u1, v0, v1, fill) { poly([P(u0, v0), P(u1, v0), P(u1, v1), P(u0, v1)], fill); }
 
 function drawSky() {
-  const g = ctx.createLinearGradient(0, 0, 0, VH);
-  g.addColorStop(0, '#bfcbd0'); g.addColorStop(0.55, '#e8dfc8'); g.addColorStop(1, '#efe3c4');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
-  // the sun, barely visible through the smog
-  ctx.fillStyle = 'rgba(255,236,190,0.55)';
-  ctx.beginPath(); ctx.arc(VW * 0.82, 90, 34, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#cfc6ae'; ctx.fillRect(0, 0, VW, VH);
 }
 
 function drawGround() {
@@ -440,6 +446,14 @@ function drawGround() {
   for (let u = Math.floor(a / stripe) * stripe; u < b; u += stripe * 2) {
     quad(u, u + stripe, R + 40, VFAR, 'rgba(255,255,255,0.07)');
     quad(u, u + stripe, -6000, -R - 140, 'rgba(255,255,255,0.07)');
+  }
+  // the city beyond the hedge: paved plaza, with a street between the rows of buildings
+  quad(a, b, VFAR, 6000, '#cfc6ae');
+  quad(a, b, VFAR + 165, VFAR + 215, '#8a8780');
+  for (let u = Math.floor(a / 120) * 120; u < b; u += 120) quad(u, u + 50, VFAR + 189, VFAR + 191, '#e9e4d6');
+  for (let u = Math.floor(a / 60) * 60; u < b; u += 60) {
+    ctx.strokeStyle = 'rgba(120,110,90,0.18)'; ctx.lineWidth = 1;
+    const p0 = P(u, VFAR), p1 = P(u, VFAR + 165); ctx.beginPath(); ctx.moveTo(...p0); ctx.lineTo(...p1); ctx.stroke();
   }
   // hedge at the far edge
   quad(a, b, VFAR - 22, VFAR, '#6f7f45');
@@ -473,18 +487,65 @@ function drawGround() {
   }
 }
 
+const BUILDING_SIGNS = [
+  { text: 'BJP OFFICE', sub: 'Open 24x7. Protest site: closed.', plate: '#f08a24', fg: '#fff', wall: ['#f6a24a', '#e07f1f', '#ffc27a'], flag: true },
+  { text: 'WASHING MACHINE PVT LTD', sub: 'Join party, get clean', plate: '#2f7fd0', fg: '#fff', wall: ['#eef2f5', '#d3dae0', '#ffffff'] },
+  { text: 'ED OFFICE', sub: 'Opposition counter only', plate: '#3d4a5c', fg: '#ffd34d' },
+  { text: 'GODI MEDIA TV', sub: 'BREAKING: Protesters paid Rs 500', plate: '#c0392b', fg: '#fff', dish: true },
+  { text: 'PM CARES', sub: 'Not under RTI', plate: '#1d6b3a', fg: '#fff' },
+  { text: 'ELECTORAL BONDS', sub: 'Anonymous deposits welcome', plate: '#6b3fa0', fg: '#fff' },
+  { text: 'MINISTRY OF PERMISSIONS', sub: 'Closed till further notice', plate: '#535353', fg: '#fff' },
+  { text: 'IT CELL', sub: 'Now hiring: 10,000 trolls', plate: '#f08a24', fg: '#fff' },
+  { text: 'CENTRAL VISTA', sub: 'Under construction since 2020', plate: '#d9a400', fg: '#1c1c1c' },
+  { text: 'PARLIAMENT ST POLICE STN', sub: 'Detained protesters: this way', plate: '#1f2a44', fg: '#fff' },
+];
+
+// text painted on the near face (v = const) of something, running along u
+function faceText(u, v, z, text, size, color, maxW) {
+  const [x, y] = P(u, v, z);
+  ctx.save(); ctx.translate(x, y); ctx.transform(UX, UY, 0, 1, 0, 0);
+  ctx.font = `${size}px ${FONT}`;
+  const w = ctx.measureText(text).width;
+  if (maxW && w > maxW) ctx.scale(maxW / w, 1);
+  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+function facePlate(u0, u1, v, z0, z1, fill) { poly([P(u0, v, z0), P(u1, v, z0), P(u1, v, z1), P(u0, v, z1)], fill); }
+
 function drawBuilding(o) {
-  const tones = [['#d8cdb6', '#c4b89f', '#e6dcc6'], ['#d6b9a4', '#c19f89', '#e3cbb8'], ['#cfcfc8', '#b9b9b0', '#dededa']][o.tone];
-  const A = P(o.u, o.v), B = P(o.u + o.lu, o.v), C = P(o.u + o.lu, o.v + o.d), D = P(o.u, o.v + o.d);
-  const up = p => [p[0], p[1] - o.h];
-  poly([A, B, up(B), up(A)], tones[0]);
-  poly([B, C, up(C), up(B)], tones[1]);
-  poly([up(A), up(B), up(C), up(D)], tones[2]);
-  // windows
-  for (let z = 14; z < o.h - 10; z += 16)
-    for (let k = 10; k < o.lu - 10; k += 18) {
-      poly([P(o.u + k, o.v, z), P(o.u + k + 9, o.v, z), P(o.u + k + 9, o.v, z + 8), P(o.u + k, o.v, z + 8)], 'rgba(90,100,110,0.3)');
-    }
+  const sg = o.sign;
+  const t = sg && sg.wall || [['#d8cdb6', '#c4b89f', '#e6dcc6'], ['#d6b9a4', '#c19f89', '#e3cbb8'], ['#cfcfc8', '#b9b9b0', '#dededa']][o.tone];
+  const u0 = o.u, u1 = o.u + o.lu, v0 = o.v, v1 = o.v + o.d;
+  isoShadow(u0 + o.lu / 2, v0 + o.d / 2, o.lu / 2, o.d / 2, 18);
+  isoBox(u0, u1, v0, v1, 0, o.h, t[2], t[0], t[1]);
+  // windows on the front and the side
+  const top = sg ? o.h - 46 : o.h - 10;
+  for (let z = 14; z < top; z += 16) {
+    for (let k = 10; k < o.lu - 14; k += 18) facePlate(u0 + k, u0 + k + 9, v0, z, z + 8, 'rgba(90,100,110,0.3)');
+    for (let k = 10; k < o.d - 12; k += 16) poly([P(u1, v0 + k, z), P(u1, v0 + k + 8, z), P(u1, v0 + k + 8, z + 8), P(u1, v0 + k, z + 8)], 'rgba(70,80,90,0.3)');
+  }
+  // door
+  facePlate(u0 + o.lu / 2 - 8, u0 + o.lu / 2 + 8, v0, 0, 14, 'rgba(60,50,40,0.55)');
+  if (!sg) return;
+  // signboard
+  facePlate(u0 + 8, u1 - 8, v0 - 0.5, o.h - 40, o.h - 6, sg.plate);
+  faceText(u0 + o.lu / 2, v0 - 0.5, sg.sub ? o.h - 19 : o.h - 27, sg.text, 8, sg.fg, o.lu - 24);
+  if (sg.sub) faceText(u0 + o.lu / 2, v0 - 0.5, o.h - 33, sg.sub, 6, sg.fg, o.lu - 24);
+  if (sg.flag) {
+    const [x, y] = P(u0 + 20, v0 + o.d / 2, o.h);
+    const wave = Math.sin(state.frame / 8) * 3;
+    ctx.fillStyle = '#555'; ctx.fillRect(x - 1, y - 46, 2, 46);
+    ctx.fillStyle = '#f08a24';
+    ctx.beginPath(); ctx.moveTo(x + 1, y - 46); ctx.lineTo(x + 28, y - 39 + wave); ctx.lineTo(x + 1, y - 30); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1d8a3a'; ctx.fillRect(x + 1, y - 33, 10, 3);
+  }
+  if (sg.dish) {
+    const [x, y] = P(u1 - 25, v0 + o.d / 2, o.h);
+    ctx.fillStyle = '#777'; ctx.fillRect(x - 1, y - 14, 3, 14);
+    ctx.fillStyle = '#e6e6e6'; ctx.strokeStyle = '#888'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(x, y - 20, 14, 9, -0.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (Math.floor(state.frame / 20) % 2) { ctx.fillStyle = '#e03a2f'; ctx.fillRect(x - 2, y - 22, 4, 4); }
+  }
 }
 
 // iso box: visible faces are the near side (v = v0), the +u end and the top
@@ -597,24 +658,36 @@ function drawAuto(o) {
 }
 
 function drawChai(o) {
-  const [x, y] = P(o.u, o.v);
-  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(x, y, 34, 8, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#8a5a35'; ctx.fillRect(x - 30, y - 34, 60, 22);
-  ctx.fillStyle = '#6b4325'; ctx.fillRect(x - 30, y - 16, 60, 4);
-  ctx.fillStyle = '#2b2b2b'; ctx.beginPath(); ctx.arc(x - 18, y - 8, 8, 0, Math.PI * 2); ctx.arc(x + 18, y - 8, 8, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#b8b8b8'; ctx.fillRect(x - 12, y - 48, 18, 14);  // kettle
-  ctx.fillRect(x + 6, y - 44, 8, 3);
-  ctx.fillStyle = '#e6e0d0'; for (let i = 0; i < 4; i++) ctx.fillRect(x + 12 + i * 4, y - 40, 3, 5);  // glasses
-  ctx.fillStyle = '#c0392b'; ctx.fillRect(x - 30, y - 72, 60, 16);
-  ctx.fillStyle = '#fff'; ctx.font = `7px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('CHAI ₹10', x, y - 61); ctx.textAlign = 'left';
-  ctx.fillStyle = '#555'; ctx.fillRect(x - 28, y - 56, 2, 22); ctx.fillRect(x + 26, y - 56, 2, 22);
+  const u = o.u, v = o.v;
+  isoShadow(u, v, 34, 22, 10);
+  const wheel = wu => {
+    const [x, y] = P(wu, v - 16, 9);
+    ctx.fillStyle = '#3b2a1c'; ctx.beginPath(); ctx.ellipse(x, y, 8, 9, -0.45, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#a0784e'; ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  };
+  // canopy posts (back pair first)
+  for (const [pu, pv] of [[u - 26, v + 16], [u + 26, v + 16]]) isoBox(pu - 1.5, pu + 1.5, pv - 1.5, pv + 1.5, 0, 62, '#666', '#555', '#444');
+  isoBox(u - 30, u + 30, v - 16, v + 16, 10, 34, '#b07a4a', '#8a5a35', '#6b4325');          // cart
+  isoBox(u - 31, u + 31, v - 17, v + 17, 34, 37, '#c8956a', '#9a6a42', '#7a5030');          // counter top
+  isoBox(u - 18, u - 2, v - 6, v + 6, 37, 52, '#d6d6d6', '#b8b8b8', '#9a9a9a');             // kettle
+  isoBox(u - 2, u + 5, v - 2, v + 2, 46, 49, '#b8b8b8', '#a0a0a0', '#888');                // spout
+  for (let i = 0; i < 4; i++) isoBox(u + 8 + i * 5, u + 11 + i * 5, v - 10, v - 7, 37, 43, '#f4ead2', '#e6e0d0', '#cfc6b0');  // glasses
+  wheel(u - 18); wheel(u + 18);
+  for (const [pu, pv] of [[u - 26, v - 16], [u + 26, v - 16]]) isoBox(pu - 1.5, pu + 1.5, pv - 1.5, pv + 1.5, 0, 62, '#666', '#555', '#444');
+  // striped tarp
+  for (let i = 0; i < 6; i++) isoBox(u - 34 + i * 12, u - 22 + i * 12, v - 20, v + 20, 62, 66, i % 2 ? '#fff4e0' : '#c0392b', i % 2 ? '#eadcc2' : '#a83224', '#8e2a1e');
+  // sign hanging off the tarp's front edge
+  facePlate(u - 22, u + 22, v - 20.5, 50, 62, '#c0392b');
+  faceText(u, v - 20.5, 53, 'CHAI Rs 10', 7, '#fff');
   // steam
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+  const [kx, ky] = P(u - 10, v, 52);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2;
   for (let i = 0; i < 2; i++) {
     const t = (state.frame / 10 + i * 3) % 6;
-    ctx.beginPath(); ctx.moveTo(x - 3 + i * 6, y - 50 - t * 3); ctx.quadraticCurveTo(x + 3 + i * 6, y - 56 - t * 3, x - 3 + i * 6, y - 62 - t * 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(kx - 3 + i * 6, ky - t * 3); ctx.quadraticCurveTo(kx + 3 + i * 6, ky - 6 - t * 3, kx - 3 + i * 6, ky - 12 - t * 3); ctx.stroke();
   }
-  bubbleAt(x, y - 80, 'Chai pi lo. Jantar Mantar kahin nahi jaa raha.');
+  const [bx, by] = P(u, v, 80);
+  bubbleAt(bx, by, 'Chai pi lo. Jantar Mantar kahin nahi jaa raha.');
 }
 
 function drawJantarMantar() {
@@ -758,7 +831,7 @@ function drawWorld() {
   for (const o of s.scenery) {
     const key = o.u - 1.087 * o.v;
     const fn = { tree: drawTree, palm: drawPalm, bush: drawBush, lamp: drawLamp, sign: drawSign, cow: drawCow, auto: drawAuto, chai: drawChai, building: drawBuilding }[o.type];
-    items.push({ key: o.type === 'building' ? -1e9 + o.u : key, draw: () => fn(o) });
+    items.push({ key: o.type === 'building' ? o.u + o.lu / 2 - 1.087 * (o.v + o.d / 2) : key, draw: () => fn(o) });
   }
   if (!s.jm.gone) items.push({ key: s.jm.u - 1.087 * s.jm.v, draw: drawJantarMantar });
   for (const o of s.obstacles) {
@@ -771,11 +844,8 @@ function drawWorld() {
   }
   items.push({ key: cam + 0.5, draw: drawDino });
   items.sort((a, b) => a.key - b.key);
-  // buildings first (behind the ground edge), then ground, then everything else
-  let i = 0;
-  for (; i < items.length && items[i].key < -1e8; i++) items[i].draw();
   drawGround();
-  for (; i < items.length; i++) items[i].draw();
+  for (const it of items) it.draw();
 }
 
 function drawSkyLife() {
